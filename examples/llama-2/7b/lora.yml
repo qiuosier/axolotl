@@ -5,6 +5,7 @@ is_llama_derived_model: true
 
 load_in_8bit: false
 load_in_4bit: false
+bf16: true
 strict: false
 
 datasets:
