@@ -14,7 +14,7 @@ dataset_prepared_path:
 val_set_size: 0.05
 output_dir: /home/datascience/outputs
 
-sequence_len: 8192
+sequence_len: 3072
 sample_packing: false
 pad_to_sequence_len: true
 
