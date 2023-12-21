@@ -1,9 +1,9 @@
-base_model: meta-llama/Llama-2-7b-hf
-model_type: LlamaForCausalLM
+base_model: mistralai/Mistral-7B-v0.1
+model_type: MistralForCausalLM
 tokenizer_type: LlamaTokenizer
-is_llama_derived_model: true
+is_mistral_derived_model: true
 
-load_in_8bit: false
+load_in_8bit: true
 load_in_4bit: false
 strict: false
 
@@ -14,8 +14,8 @@ dataset_prepared_path:
 val_set_size: 0.05
 output_dir: /home/datascience/outputs
 
-sequence_len: 4096
-sample_packing: false
+sequence_len: 8192
+sample_packing: true
 pad_to_sequence_len: true
 
 adapter: lora
@@ -35,7 +35,7 @@ wandb_log_model:
 gradient_accumulation_steps: 4
 micro_batch_size: 2
 num_epochs: 4
-optimizer: adamw_torch
+optimizer: adamw_bnb_8bit
 lr_scheduler: cosine
 learning_rate: 0.0002
 
@@ -46,6 +46,7 @@ fp16: false
 tf32: false
 
 gradient_checkpointing: true
+load_best_model_at_end: false
 early_stopping_patience:
 resume_from_checkpoint:
 local_rank:
@@ -62,12 +63,7 @@ debug:
 deepspeed:
 weight_decay: 0.0
 fsdp:
-  - full_shard
-  - auto_wrap
 fsdp_config:
-  fsdp_offload_params: true
-  fsdp_state_dict_type: FULL_STATE_DICT
-  fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
 special_tokens:
   bos_token: "<s>"
   eos_token: "</s>"
