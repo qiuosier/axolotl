@@ -654,7 +654,7 @@ def load_model(
     if needs_fa2_dtype or cfg.flash_attention:
         LOG.info("converting modules to %s for flash attention", cfg.torch_dtype)
         for name, module in model.named_modules():
-            if "norm" in name:
+            if any(m in name for m in ["norm", "gate"]):
                 module.to(cfg.torch_dtype)
             if any(m in name for m in embedding_modules):
                 if hasattr(module, "weight"):
