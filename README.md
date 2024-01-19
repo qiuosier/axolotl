@@ -10,7 +10,7 @@ Features:
 - Integrated with xformer, flash attention, rope scaling, and multipacking
 - Works with single GPU or multiple GPUs via FSDP or Deepspeed
 - Easily run with Docker locally or on the cloud
-- Log results and optionally checkpoints to wandb
+- Log results and optionally checkpoints to wandb or mlflow
 - And more!
 
 
@@ -25,7 +25,7 @@ Features:
 - [Installation](#installation)
   - [Docker](#docker)
   - [Conda/Pip venv](#condapip-venv)
-  - [Runpod](#runpod)
+  - [Cloud GPU](#cloud-gpu) - Runpod, Latitude
   - [LambdaLabs](#lambdalabs)
   - [Windows](#windows)
   - [Launching on public clouds via SkyPilot](#launching-on-public-clouds-via-skypilot)
@@ -36,11 +36,15 @@ Features:
   - [Train](#train)
   - [Inference](#inference)
   - [Merge LORA to Base](#merge-lora-to-base)
+  - [Special Tokens](#special-tokens)
 - [Common Errors](#common-errors-)
+  - [Tokenization Mismatch b/w Training & Inference](#tokenization-mismatch-bw-inference--training)
+- [Debugging Axolotl](#debugging-axolotl)
 - [Need Help?](#need-help-)
 - [Badge](#badge-)
 - [Community Showcase](#community-showcase)
 - [Contributing](#contributing-)
+- [Sponsors](#sponsors-)
 
 </td>
 <td>
@@ -128,6 +132,9 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   docker compose up -d
   ```
 
+>[!Tip]
+> If you want to debug axolotl or prefer to use Docker as your development environment, see the [debugging guide's section on Docker](docs/debugging.md#debugging-with-docker).
+
   <details>
 
   <summary>Docker advanced</summary>
@@ -135,7 +142,7 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   A more powerful Docker command to run would be this:
 
   ```bash
-  docker run --privileged --gpus '"all"' --shm-size 10g --rm -it --name axolotl --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --mount type=volume,src=axolotl,target=/workspace/axolotl -v ${HOME}/.cache/huggingface:/root/.cache/huggingface winglian/axolotl:main-py3.10-cu118-2.0.1
+docker run --privileged --gpus '"all"' --shm-size 10g --rm -it --name axolotl --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --mount type=bind,src="${PWD}",target=/workspace/axolotl -v ${HOME}/.cache/huggingface:/root/.cache/huggingface winglian/axolotl:main-py3.10-cu118-2.0.1
   ```
 
   It additionally:
@@ -165,9 +172,11 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
         ```
         Get the token at huggingface.co/settings/tokens
 
-#### Runpod
+#### Cloud GPU
 
-Use `winglian/axolotl-runpod:main-latest` or use this [direct link](https://runpod.io/gsc?template=v2ickqhz9s&ref=6i7fkpdz)
+For cloud GPU providers that support docker images, use [`winglian/axolotl-cloud:main-latest`](https://hub.docker.com/r/winglian/axolotl-cloud/tags)
+
+- on RunPod use this [direct link](https://runpod.io/gsc?template=v2ickqhz9s&ref=6i7fkpdz)
 
 #### LambdaLabs
   <details>
@@ -251,6 +260,13 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"conversations": [{"from": "...", "value": "..."}]}
   ```
+- `llama-2`: the json is the same format as `sharegpt` above, with the following config (see the [config section](#config) for more details)
+    ```yml
+    datasets:
+      - path: <your-path>
+        type: sharegpt
+        conversation: llama-2
+    ```
 - `completion`: raw corpus
   ```json
   {"text": "..."}
@@ -360,7 +376,7 @@ Have dataset(s) in one of the following format (JSONL recommended):
 For a dataset that is preprocessed for instruction purposes:
 
 ```json
-{"instruction": "...", "output": "..."}
+{"input": "...", "output": "..."}
 ```
 
 You can use this example in your YAML config:
@@ -371,6 +387,8 @@ datasets:
     type:
       system_prompt: ""
       field_system: system
+      field_instruction: input
+      field_output: output
       format: "[INST] {instruction} [/INST]"
       no_input_format: "[INST] {instruction} [/INST]"
 ```
@@ -511,6 +529,14 @@ model_config:
     type: # linear | dynamic
     factor: # float
 
+# optional overrides to the bnb 4bit quantization configuration
+# https://huggingface.co/docs/transformers/main/main_classes/quantization#transformers.BitsAndBytesConfig
+bnb_config_kwargs:
+  # These are default values
+  llm_int8_has_fp16_weight: false
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+
 
 # Whether you are training a 4-bit GPTQ quantized model
 gptq: true
@@ -533,6 +559,11 @@ tf32: true # require >=ampere
 bfloat16: true # require >=ampere
 float16: true
 
+# Limit the memory for all available GPUs to this amount (if an integer, expressed in gigabytes); default: unset
+gpu_memory_limit: 20GiB
+# Do the LoRA/PEFT loading on CPU -- this is required if the base model is so large it takes up most or all of the available GPU VRAM, e.g. during a model and LoRA merge
+lora_on_cpu: true
+
 # A list of one or more datasets to finetune the model with
 datasets:
   # HuggingFace dataset repo | s3://,gs:// path | "json" for local dataset, make sure to fill data_files
@@ -550,10 +581,10 @@ datasets:
     field_human: # Optional[str]. Human key to use for conversation.
     field_model: # Optional[str]. Assistant key to use for conversation.
 
-  # Custom user prompt
+  # Custom user instruction prompt
   - path: repo
     type:
-      # The below are defaults. only set what's needed.
+      # The below are defaults. only set what's needed if you use a different column name.
       system_prompt: ""
       system_format: "{system}"
       field_system: system
@@ -562,6 +593,7 @@ datasets:
       field_output: output
 
       # Customizable to be single line or multi-line
+      # Use {instruction}/{input} as key to be replaced
       # 'format' can include {input}
       format: |-
         User: {instruction} {input}
@@ -572,6 +604,12 @@ datasets:
       # For `completion` datsets only, uses the provided field instead of `text` column
       field:
 
+# use RL training: dpo, ipo, kto_pair
+rl:
+
+# Saves the desired chat template to the tokenizer_config.json for easier inferencing
+# Currently supports chatml and inst (mistral/mixtral)
+chat_template: chatml
 # Axolotl attempts to save the dataset as an arrow after packing the data together so
 # subsequent training attempts load faster, relative path
 dataset_prepared_path: data/last_run_prepared
@@ -623,7 +661,8 @@ max_memory:
 # If you want to use 'lora' or 'qlora' or leave blank to train all parameters in original model
 adapter: lora
 # If you already have a lora model trained that you want to load, put that here.
-# This means after training, if you want to test the model, you should set this to the value of `lora_out_dir`.
+# This means after training, if you want to test the model, you should set this to the value of `output_dir`.
+# Note that if you merge an adapter to the base model, a new subdirectory `merged` will be created under the `output_dir`.
 lora_model_dir:
 
 # LoRA hyperparameters
@@ -640,7 +679,8 @@ lora_target_modules:
 #  - gate_proj
 #  - down_proj
 #  - up_proj
-lora_target_linear: # If true, will target all linear layers
+lora_target_linear: # If true, will target all linear modules
+peft_layers_to_transform: # The layer indices to transform, otherwise, apply to all layers
 
 # If you added new tokens to the tokenizer, you may need to save some LoRA modules because they need to know the new tokens.
 # For LLaMA and Mistral, you need to save `embed_tokens` and `lm_head`. It may vary for other models.
@@ -650,10 +690,6 @@ lora_modules_to_save:
 #  - embed_tokens
 #  - lm_head
 
-# Once you complete training, the model will be saved to the following directory.
-# If you merge the adapter to the base model, a subdirectory `merged` will be created under this directory.
-# Make sure `lora_model_dir` points to this directory if you want to use the trained model.
-lora_out_dir:
 lora_fan_in_fan_out: false
 
 # ReLoRA configuration
@@ -663,6 +699,7 @@ relora_warmup_steps: # Number of per-restart warmup steps
 relora_cpu_offload: # True to perform lora weight merges on cpu during restarts, for modest gpu memory savings
 
 # wandb configuration if you're using it
+# Make sure your `WANDB_API_KEY` environment variable is set (recommended) or you login to wandb with `wandb login`.
 wandb_mode: # "offline" to save run metadata locally and not sync to the server, "disabled" to turn off wandb
 wandb_project: # Your wandb project name
 wandb_entity: # A wandb Team name if using a Team
@@ -670,6 +707,10 @@ wandb_watch:
 wandb_name: # Set the name of your wandb run
 wandb_run_id: # Set the ID of your wandb run
 wandb_log_model: # "checkpoint" to log model to wandb Artifacts every `save_steps` or "end" to log only at the end of training
+
+# mlflow configuration if you're using it
+mlflow_tracking_uri: # URI to mlflow
+mlflow_experiment_name: # Your experiment name
 
 # Where to save the full-finetuned model to
 output_dir: ./completed-model
@@ -720,6 +761,9 @@ group_by_length: false
 
 # Whether to use gradient checkpointing https://huggingface.co/docs/transformers/v4.18.0/en/performance#gradient-checkpointing
 gradient_checkpointing: false
+# additional kwargs to pass to the trainer for gradient checkpointing
+# gradient_checkpointing_kwargs:
+#   use_reentrant: false
 
 # Stop training after this many evaluation losses have increased in a row
 # https://huggingface.co/transformers/v4.2.2/_modules/transformers/trainer_callback.html#EarlyStoppingCallback
@@ -728,6 +772,7 @@ early_stopping_patience: 3
 # Specify a scheduler and kwargs to use with the optimizer
 lr_scheduler: # 'one_cycle' | 'log_sweep' | empty for cosine
 lr_scheduler_kwargs:
+cosine_min_lr_ratio: # decay lr to some percentage of the peak lr, e.g. cosine_min_lr_ratio=0.1 for 10% of peak lr
 
 # For one_cycle optim
 lr_div_factor: # Learning rate div factor
@@ -774,7 +819,7 @@ max_grad_norm:
 # Augmentation techniques
 # NEFT https://arxiv.org/abs/2310.05914, set this to a number (paper default is 5) to add noise to embeddings
 # currently only supported on Llama and Mistral
-noisy_embedding_alpha:
+neftune_noise_alpha:
 
 # Whether to bettertransformers
 flash_optimum:
@@ -789,12 +834,8 @@ flash_attn_fuse_mlp: # Whether to fuse part of the MLP into a single operation
 # Whether to use scaled-dot-product attention
 # https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
 sdp_attention:
-# Landmark attention (only llama)
-landmark_attention:
-# xpos RoPE see https://github.com/kaiokendev/cutoff-len-is-context-len/blob/main/util/xpos_rope_llama_monkey_patch.py
-# LLaMA only
-xpos_rope:
-
+# Shifted-sparse attention (only llama) - https://arxiv.org/pdf/2309.12307.pdf
+s2_attention:
 # Resume from a specific checkpoint dir
 resume_from_checkpoint:
 # If resume_from_checkpoint isn't set and you simply want it to start where it left off.
@@ -916,8 +957,9 @@ accelerate launch -m axolotl.cli.train your_config.yml
 You can optionally pre-tokenize dataset with the following before finetuning.
 This is recommended for large datasets.
 
-- Set `push_dataset_to_hub: hf_user/repo` to push it to Huggingface.
-- Use `--debug` to see preprocessed examples.
+- Set `dataset_prepared_path:` to a local folder for saving and loading pre-tokenized dataset.
+- (Optional): Set `push_dataset_to_hub: hf_user/repo` to push it to Huggingface.
+- (Optional): Use `--debug` to see preprocessed examples.
 
 ```bash
 python -m axolotl.cli.preprocess your_config.yml
@@ -960,6 +1002,8 @@ fsdp_config:
 
 ##### Weights & Biases Logging
 
+Make sure your `WANDB_API_KEY` environment variable is set (recommended) or you login to wandb with `wandb login`.
+
 - wandb options
 ```yaml
 wandb_mode:
@@ -970,9 +1014,28 @@ wandb_name:
 wandb_log_model:
 ```
 
-### Inference
+##### Special Tokens
 
-Pass the appropriate flag to the train command:
+It is important to have special tokens like delimiters, end-of-sequence, beginning-of-sequence in your tokenizer's vocabulary.  This will help you avoid tokenization issues and help your model train better.  You can do this in axolotl like this:
+
+```yml
+special_tokens:
+  bos_token: "<s>"
+  eos_token: "</s>"
+  unk_token: "<unk>"
+tokens: # these are delimiters
+  - "<|im_start|>"
+  - "<|im_end|>"
+```
+
+When you include these tokens in your axolotl config, axolotl adds these tokens to the tokenizer's vocabulary.
+
+### Inference Playground
+
+Axolotl allows you to load your model in an interactive terminal playground for quick experimentation.
+The config file is the same config file used for training.
+
+Pass the appropriate flag to the inference command, depending upon what kind of model was trained:
 
 - Pretrained LORA:
   ```bash
@@ -998,21 +1061,23 @@ Please use `--sample_packing False` if you have it on and receive the error simi
 
 ### Merge LORA to base
 
-Add below flag to train command above
+The following command will merge your LORA adapater with your base model.  You can optionally pass the argument `--lora_model_dir` to specify the directory where your LORA adapter was saved, otherwhise, this will be inferred from `output_dir` in your axolotl config file.  The merged model is saved in the sub-directory `{lora_model_dir}/merged`.
 
 ```bash
-python3 -m axolotl.cli.merge_lora examples/your_config.yml --lora_model_dir="./completed-model" --load_in_8bit=False --load_in_4bit=False
+python3 -m axolotl.cli.merge_lora your_config.yml --lora_model_dir="./completed-model"
 ```
 
-If you run out of CUDA memory, you can try to merge in system RAM with
+You may need to use the `gpu_memory_limit` and/or `lora_on_cpu` config options to avoid running out of memory. If you still run out of CUDA memory, you can try to merge in system RAM with
 
 ```bash
 CUDA_VISIBLE_DEVICES="" python3 -m axolotl.cli.merge_lora ...
 ```
 
+although this will be very slow, and using the config options above are recommended instead.
+
 ## Common Errors 🧰
 
-See also the [FAQ's](./docs/faq.md).
+See also the [FAQ's](./docs/faq.md) and [debugging guide](docs/debugging.md).
 
 > If you encounter a 'Cuda out of memory' error, it means your GPU ran out of memory during the training process. Here's how to resolve it:
 
@@ -1048,6 +1113,24 @@ It's safe to ignore it.
 
 See the [NCCL](docs/nccl.md) guide.
 
+
+### Tokenization Mismatch b/w Inference & Training
+
+For many formats, Axolotl constructs prompts by concatenating token ids _after_ tokenizing strings.  The reason for concatenating token ids rather than operating on strings is to maintain precise accounting for attention masks.
+
+If you decode a prompt constructed by axolotl, you might see spaces between tokens (or lack thereof) that you do not expect, especially around delimiters and special tokens.  When you are starting out with a new format, you should always do the following:
+
+1. Materialize some data using `python -m axolotl.cli.preprocess your_config.yml --debug`, and then decode the first few rows with your model's tokenizer.
+2. During inference, right before you pass a tensor of token ids to your model, decode these tokens back into a string.
+3. Make sure the inference string from #2 looks **exactly** like the data you fine tuned on from #1, including spaces and new lines.  If they aren't the same adjust your inference server accordingly.
+4. As an additional troubleshooting step, you can look look at the token ids between 1 and 2 to make sure they are identical.
+
+Having misalignment between your prompts during training and inference can cause models to perform very poorly, so it is worth checking this.  See [this blog post](https://hamel.dev/notes/llm/05_tokenizer_gotchas.html) for a concrete example.
+
+## Debugging Axolotl
+
+See [this debugging guide](docs/debugging.md) for tips on debugging Axolotl, along with an example configuration for debugging with VSCode.
+
 ## Need help? 🙋♂️
 
 Join our [Discord server](https://discord.gg/HhrNrHJPRb) where we can help you
@@ -1067,7 +1150,7 @@ Building something cool with Axolotl? Consider adding a badge to your model card
 Check out some of the projects and models that have been built using Axolotl! Have a model you'd like to add to our Community Showcase? Open a PR with your model.
 
 Open Access AI Collective
-- [Minotaur 13b](https://huggingface.co/openaccess-ai-collective/minotaur-13b)
+- [Minotaur 13b](https://huggingface.co/openaccess-ai-collective/minotaur-13b-fixed)
 - [Manticore 13b](https://huggingface.co/openaccess-ai-collective/manticore-13b)
 - [Hippogriff 30b](https://huggingface.co/openaccess-ai-collective/hippogriff-30b-chat)
 
@@ -1090,3 +1173,33 @@ pre-commit install
 # test
 pytest tests/
 ```
+
+## Sponsors 🤝❤
+
+OpenAccess AI Collective is run by volunteer contributors such as [winglian](https://github.com/winglian),
+[NanoCode012](https://github.com/NanoCode012), [tmm1](https://github.com/tmm1),
+[mhenrichsen](https://github.com/mhenrichsen), [casper-hansen](https://github.com/casper-hansen),
+[hamelsmu](https://github.com/hamelsmu) and many more who help us accelerate forward by fixing bugs, answering
+community questions and implementing new features. Axolotl needs donations from sponsors for the compute needed to
+run our unit & integration tests, troubleshooting community issues, and providing bounties. If you love axolotl,
+consider sponsoring the project via [GitHub Sponsors](https://github.com/sponsors/OpenAccess-AI-Collective),
+[Ko-fi](https://ko-fi.com/axolotl_ai) or reach out directly to
+[wing@openaccessaicollective.org](mailto:wing@openaccessaicollective.org).
+
+---
+
+#### 💎 Diamond Sponsors - [Contact directly](mailto:wing@openaccessaicollective.org)
+
+---
+
+#### 🥇 Gold Sponsors - $5000/mo
+
+---
+
+#### 🥈 Silver Sponsors - $1000/mo
+
+---
+
+#### 🥉 Bronze Sponsors - $500/mo
+
+---
