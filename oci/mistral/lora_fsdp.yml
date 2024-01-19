@@ -15,7 +15,7 @@ val_set_size: 0.05
 output_dir: /home/datascience/outputs
 
 sequence_len: 4096
-sample_packing: true
+sample_packing: false
 pad_to_sequence_len: true
 
 adapter: lora
@@ -66,7 +66,7 @@ fsdp:
   - full_shard
   - auto_wrap
 fsdp_config:
-  fsdp_offload_params: false
+  fsdp_offload_params: true
   fsdp_state_dict_type: SHARDED_STATE_DICT
   fsdp_transformer_layer_cls_to_wrap: MistralDecoderLayer
 special_tokens:
