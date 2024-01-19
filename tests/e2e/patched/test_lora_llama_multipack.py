@@ -7,7 +7,8 @@ import os
 import unittest
 from pathlib import Path
 
-from transformers.utils import is_torch_bf16_gpu_available
+import pytest
+from transformers.utils import is_auto_gptq_available, is_torch_bf16_gpu_available
 
 from axolotl.cli import load_datasets
 from axolotl.common.cli import TrainerCliArgs
@@ -15,15 +16,15 @@ from axolotl.train import train
 from axolotl.utils.config import normalize_config
 from axolotl.utils.dict import DictDefault
 
-from .utils import with_temp_dir
+from ..utils import with_temp_dir
 
 LOG = logging.getLogger("axolotl.tests.e2e")
 os.environ["WANDB_DISABLED"] = "true"
 
 
-class TestMistral(unittest.TestCase):
+class TestLoraLlama(unittest.TestCase):
     """
-    Test case for Llama models using LoRA
+    Test case for Llama models using LoRA w multipack
     """
 
     @with_temp_dir
@@ -31,10 +32,11 @@ class TestMistral(unittest.TestCase):
         # pylint: disable=duplicate-code
         cfg = DictDefault(
             {
-                "base_model": "openaccess-ai-collective/tiny-mistral",
-                "flash_attention": True,
-                "sample_packing": True,
+                "base_model": "JackFram/llama-68m",
+                "tokenizer_type": "LlamaTokenizer",
                 "sequence_len": 1024,
+                "sample_packing": True,
+                "flash_attention": True,
                 "load_in_8bit": True,
                 "adapter": "lora",
                 "lora_r": 32,
@@ -54,17 +56,19 @@ class TestMistral(unittest.TestCase):
                     },
                 ],
                 "num_epochs": 2,
-                "micro_batch_size": 2,
+                "micro_batch_size": 8,
                 "gradient_accumulation_steps": 1,
                 "output_dir": temp_dir,
                 "learning_rate": 0.00001,
                 "optimizer": "adamw_torch",
                 "lr_scheduler": "cosine",
-                "max_steps": 20,
-                "save_steps": 10,
-                "eval_steps": 10,
             }
         )
+        if is_torch_bf16_gpu_available():
+            cfg.bf16 = True
+        else:
+            cfg.fp16 = True
+
         normalize_config(cfg)
         cli_args = TrainerCliArgs()
         dataset_meta = load_datasets(cfg=cfg, cli_args=cli_args)
@@ -72,15 +76,26 @@ class TestMistral(unittest.TestCase):
         train(cfg=cfg, cli_args=cli_args, dataset_meta=dataset_meta)
         assert (Path(temp_dir) / "adapter_model.bin").exists()
 
+    @pytest.mark.skipif(not is_auto_gptq_available(), reason="auto-gptq not available")
     @with_temp_dir
-    def test_ft_packing(self, temp_dir):
+    def test_lora_gptq_packed(self, temp_dir):
         # pylint: disable=duplicate-code
         cfg = DictDefault(
             {
-                "base_model": "openaccess-ai-collective/tiny-mistral",
-                "flash_attention": True,
-                "sample_packing": True,
+                "base_model": "TheBlokeAI/jackfram_llama-68m-GPTQ",
+                "model_type": "AutoModelForCausalLM",
+                "tokenizer_type": "LlamaTokenizer",
                 "sequence_len": 1024,
+                "sample_packing": True,
+                "flash_attention": True,
+                "load_in_8bit": True,
+                "adapter": "lora",
+                "gptq": True,
+                "gptq_disable_exllama": True,
+                "lora_r": 32,
+                "lora_alpha": 64,
+                "lora_dropout": 0.05,
+                "lora_target_linear": True,
                 "val_set_size": 0.1,
                 "special_tokens": {
                     "unk_token": "<unk>",
@@ -94,24 +109,18 @@ class TestMistral(unittest.TestCase):
                     },
                 ],
                 "num_epochs": 2,
-                "micro_batch_size": 2,
+                "save_steps": 0.5,
+                "micro_batch_size": 8,
                 "gradient_accumulation_steps": 1,
                 "output_dir": temp_dir,
                 "learning_rate": 0.00001,
                 "optimizer": "adamw_torch",
                 "lr_scheduler": "cosine",
-                "max_steps": 20,
-                "save_steps": 10,
-                "eval_steps": 10,
             }
         )
-        if is_torch_bf16_gpu_available():
-            cfg.bf16 = True
-        else:
-            cfg.fp16 = True
         normalize_config(cfg)
         cli_args = TrainerCliArgs()
         dataset_meta = load_datasets(cfg=cfg, cli_args=cli_args)
 
         train(cfg=cfg, cli_args=cli_args, dataset_meta=dataset_meta)
-        assert (Path(temp_dir) / "pytorch_model.bin").exists()
+        assert (Path(temp_dir) / "adapter_model.bin").exists()

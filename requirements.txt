@@ -21,6 +21,7 @@ hf_transfer
 colorama
 numba
 numpy>=1.24.4
+mlflow
 # qlora things
 bert-score==0.3.13
 evaluate==0.4.0
@@ -33,7 +34,11 @@ fschat==0.2.34
 gradio==3.50.2
 tensorboard
 
+mamba-ssm==1.1.1
+
 # remote filesystems
 s3fs
 gcsfs
 # adlfs
+
+trl>=0.7.9
