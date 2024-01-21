@@ -46,6 +46,7 @@ class TrainDatasetMeta:
 def train(
     *, cfg: DictDefault, cli_args: TrainerCliArgs, dataset_meta: TrainDatasetMeta
 ) -> Tuple[Union[PeftModel, PreTrainedModel], PreTrainedTokenizer]:
+    print(cfg)
     # load the tokenizer first
     LOG.debug(
         f"loading tokenizer... {cfg.tokenizer_config or cfg.base_model_config}",
