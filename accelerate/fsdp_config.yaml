@@ -11,7 +11,7 @@ fsdp_config:
   fsdp_sync_module_states: true
   fsdp_use_orig_params: false
 main_training_function: main
-mixed_precision: "no"
+mixed_precision: bf16
 rdzv_backend: static
 same_network: true
 tpu_env: []
