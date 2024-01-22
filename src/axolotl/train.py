@@ -47,7 +47,7 @@ def train(
     *, cfg: DictDefault, cli_args: TrainerCliArgs, dataset_meta: TrainDatasetMeta
 ) -> Tuple[Union[PeftModel, PreTrainedModel], PreTrainedTokenizer]:
     for key, val in cfg.items():
-        print(f"{key:20}: {val}")
+        print(f"{key:30}: {val}")
 
     # load the tokenizer first
     LOG.debug(
